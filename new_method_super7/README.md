@@ -54,20 +54,22 @@ A **precision-first Super7 resolver** that:
 
 This section gives a visual understanding of how the system works end-to-end.
 
+> **Note:** All Mermaid diagrams below are GitHub-compatible (no `<br/>`, braces, or ellipsis that break parsing).
+
 ## 2.1 High-Level Architecture (A)
 
 ```mermaid
 flowchart LR
-    A[Super7Input<br/>company_name + hints] --> B[Build Search Queries]
-    B --> C[WebSearchTool<br/>(Tavily)]
+    A[Super7Input (company_name + hints)] --> B[Build Search Queries]
+    B --> C[WebSearchTool (Tavily)]
     C --> D[Filtered Search Results]
-    D --> E[ScraperTool<br/>Docling + BeautifulSoup]
+    D --> E[ScraperTool (Docling + BeautifulSoup)]
     E --> F[Raw Page Text]
-    F --> G[SnippetExtractor<br/>name + regex windows]
-    G --> H[LLMExtractor<br/>OpenAI JSON extraction]
-    H --> I[Candidate Records<br/>(entities + page scores)]
-    I --> J[Super7 Summarizer<br/>per-field scoring]
-    J --> K[Final Super7 JSON<br/>value + source + confidence]
+    F --> G[SnippetExtractor (name and regex windows)]
+    G --> H[LLMExtractor (OpenAI JSON extraction)]
+    H --> I[Candidate Records (entities + page scores)]
+    I --> J[Super7 Summarizer (per-field scoring)]
+    J --> K[Final Super7 JSON]
 ```
 
 ## 2.2 Component Architecture Diagram (C)
@@ -86,7 +88,7 @@ classDiagram
 
     class WebSearchTool {
       +max_results: int
-      +search(Super7Input): List[SearchResult]
+      +search(s7: Super7Input): List[SearchResult]
     }
 
     class ScraperTool {
@@ -145,9 +147,9 @@ sequenceDiagram
             LLM-->>Resolver: PageExtractionResult
         end
 
-        Resolver-->>BatchAPI: company_result (candidates + super7_summary)
+        Resolver-->>BatchAPI: company_result (candidates + summary)
     end
-    BatchAPI-->>Client: { "results": [...] }
+    BatchAPI-->>Client: results JSON
 ```
 
 ## 2.4 Full System Flow Diagram (B)
@@ -155,14 +157,15 @@ sequenceDiagram
 ```mermaid
 flowchart TD
     A[Start: Super7Input] --> B[Normalize company name]
-    B --> C[Build search queries<br/>name + hints + phone]
+    B --> C[Build search queries (name + hints + phone)]
     C --> D[WebSearch via Tavily]
 
-    D --> E{Domain / title / snippet filter<br/>should_consider_search_result?}
+    D --> E{Should consider search result?}
     E -- No --> D2[Skip result]
-    E -- Yes --> F[ScraperTool.fetch(url)<br/>Docling / requests + BS4]
+    E -- Yes --> F[ScraperTool.fetch(url)]
+    F --> F1[Docling or requests + BeautifulSoup]
 
-    F --> G{doc_mentions_company?}
+    F1 --> G{Does page mention company?}
     G -- No --> G2[Drop page]
     G -- Yes --> H[extract_snippets_for_company]
 
@@ -170,9 +173,9 @@ flowchart TD
     I --> J[CandidateRecord per URL]
 
     J --> K[Aggregate all candidates]
-    K --> L[Same-company guard<br/>(name similarity)]
-    L --> M[Per-entity scoring<br/>score_field_candidate]
-    M --> N[summarize_super7_simple<br/>pick best for each field]
+    K --> L[Same-company guard (name similarity)]
+    L --> M[Per-entity scoring (score_field_candidate)]
+    M --> N[summarize_super7_simple]
     N --> O[Final Super7 JSON]
     O --> P[End]
 ```
@@ -181,28 +184,28 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    A[Client<br/>list of companies] --> B[resolve_super7_batch]
+    A[Client (list of companies)] --> B[resolve_super7_batch]
     B --> C[Loop over payloads]
     C --> D[Super7Input validation]
     D --> E[Super7Resolver.process_company]
-    E --> F[Per-company result<br/>primary_url + candidates + summary]
+    E --> F[Per-company result]
     F --> G[Append to results list]
-    G --> H[Return { "results": [...] }]
+    G --> H[Return batch results]
 ```
 
 ## 2.6 Super7 Entity Selection Logic (F)
 
 ```mermaid
 flowchart TD
-    A[All Candidate Records<br/>(entities from all pages)] --> B[Group by Super7 field]
-    B --> C[Filter out entities from excluded domains]
-    C --> D[Apply same-company guard<br/>for non-name fields]
-    D --> E[Compute raw score for each entity<br/>score_field_candidate]
+    A[All candidate records from all pages] --> B[Group entities by Super7 field]
+    B --> C[Filter entities from excluded domains]
+    C --> D[Apply same-company guard for non-name fields]
+    D --> E[Compute raw score for each entity]
     E --> F{Best raw_score >= 0.3?}
-    F -- No --> G[Set field = null]
+    F -- No --> G[Set field to null]
     F -- Yes --> H[Pick best entity as winner]
-    H --> I[Normalize confidence: raw_score/2.0 -> [0,1]]
-    I --> J[Build field JSON<br/>value + source + confidence + all_sources]
+    H --> I[Normalize confidence (raw_score / 2.0)]
+    I --> J[Build field JSON (value, source, confidence, all_sources)]
 ```
 
 ---
@@ -257,7 +260,7 @@ For each company in the batch:
 
 4. **Search-level filtering via `should_consider_search_result`**
    - Skip obviously irrelevant results:
-     - Use domain blacklists (e.g., news, DNB, social)
+     - Use domain blacklists (e.g., news, social, public DNB pages)
      - Compute Jaccard similarity between normalized company name and result title
      - Or check if snippet contains the company name
    - If neither holds, we **do not scrape** the URL.
@@ -507,20 +510,28 @@ This avoids picking addresses for:
 
 ---
 
-## 5.5 Why exclude social / DNB / news outlets for Super7 truth?
+## 5.5 Why exclude social / public DNB / news outlets for Super7 truth?
 
 We observed:
 
-- DNB pages may contain multiple addresses or partial info  
-- Social media often has outdated / weirdly formatted addresses  
-- News frequently mentions addresses in legal/court contexts  
+- Public DNB pages may contain multiple addresses, partial info, or be out-of-sync with our internal systems.  
+- Social media often has outdated or user-generated addresses.  
+- News frequently mentions addresses in legal/court or one-off event contexts.
 
-So, in `SUMMARY_DOMAIN_EXCLUDE`, we list domains that should **never** be used as **primary truth sources**.
+Because this resolver is **being developed for internal use inside D&B**, we explicitly:
 
-They can still influence:
+- Do **not** want to treat public DNB pages as an external “source of truth” for Super7.  
+- Instead, for identity resolution we focus on:
+  - Official company websites  
+  - Government / registry sources  
+  - First-party or clearly authoritative domains
 
-- Page-level scores (indirectly, via LLM)  
-- Debugging and context  
+So, in `SUMMARY_DOMAIN_EXCLUDE`, we list domains (including public DNB and social) that should **never** be used as **primary truth sources**.
+
+They can still:
+
+- Influence page-level scores (indirectly, via LLM)  
+- Show up during debugging  
 
 But they do not become `"source"` in Super7 summary fields.
 
@@ -798,3 +809,7 @@ Ensure these are available in the environment where your resolver runs (e.g., VS
 - Add caching layer for repeated companies / domains  
 - Add evaluation harness with labeled companies and expected Super7 fields  
 
+---
+
+**End of README**  
+This file is ready to be dropped into a repository as `README.md`.
