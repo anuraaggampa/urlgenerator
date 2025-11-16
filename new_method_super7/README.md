@@ -798,7 +798,3 @@ Ensure these are available in the environment where your resolver runs (e.g., VS
 - Add caching layer for repeated companies / domains  
 - Add evaluation harness with labeled companies and expected Super7 fields  
 
----
-
-**End of README**  
-This file is ready to be dropped into a repository as `README.md`.
