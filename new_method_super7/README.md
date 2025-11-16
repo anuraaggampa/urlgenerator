@@ -514,7 +514,6 @@ This avoids picking addresses for:
 
 We observed:
 
-- Public DNB pages may contain multiple addresses, partial info, or be out-of-sync with our internal systems.  
 - Social media often has outdated or user-generated addresses.  
 - News frequently mentions addresses in legal/court or one-off event contexts.
 
@@ -811,5 +810,3 @@ Ensure these are available in the environment where your resolver runs (e.g., VS
 
 ---
 
-**End of README**  
-This file is ready to be dropped into a repository as `README.md`.
